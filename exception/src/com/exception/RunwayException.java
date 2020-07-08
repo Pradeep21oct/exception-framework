@@ -1,5 +1,6 @@
 package com.exception;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -104,8 +105,177 @@ public class RunwayException extends RuntimeException{
         this.threadId = threadId;
     }
 
-    private List<TraceFrame> getStackFrames(StackTraceElement[] stackTrace) {
-       return null;
+    /**
+     *  add one snapshot to current stack trace frame.
+     * @param name name of variable
+     * @param object
+     * @param <T> type of param
+     */
+    public <T> void  snap(String name, T object){
+       if(stackFrame.isEmpty()) return;
+
+       String value=null;
+       if(object!=null){
+           value=object.toString();
+       }
+       Snapshot snapshot=new Snapshot(name,value);
+       TraceNumber frameNumber=TraceNumber.determineCurrentFrame(this.className);
+       if(frameNumber.isUndefind()){
+           stackFrame.get(0).addSnapshot(snapshot);
+           return;
+       }
+
+       boolean found =false;
+       for (TraceFrame frame:stackFrame){
+           if(frame.getTraceNumber().equals(frameNumber)){
+               frame.addSnapshot(snapshot);
+               found=true;
+               break;
+           }
+       }
+
+       if(!found){
+           stackFrame.get(0).addSnapshot(snapshot);
+       }
     }
 
+    /**
+     * add one line of debug info
+     * @param name
+     * @param value
+     */
+    public  void snap(String name, int value){
+        snap(name,Integer.toString(value));
+    }
+
+    /**
+     * add one line of debug info
+     * @param name
+     * @param value
+     */
+    public  void snap(String name, long value){
+        snap(name,Long.toString(value));
+    }
+
+    /**
+     * add one line of debug info
+     * @param name
+     * @param value
+     */
+    public  void snap(String name, boolean value){
+        snap(name,Boolean.toString(value));
+    }
+
+    public static RunwayException of(final Throwable throwable){
+        if(throwable==null) return  new RunwayException();
+        if(throwable instanceof RunwayException){
+            long currentThreadId=Thread.currentThread().getId();
+            RunwayException sourceBug=(RunwayException)throwable;
+            if(currentThreadId==sourceBug.threadId){
+                return sourceBug;
+            }
+            return new RunwayException(sourceBug);
+        }
+        return new RunwayException(throwable);
+    }
+
+    private  static List<TraceFrame> getStackFrames(StackTraceElement[] stackTrace) {
+        if(stackTrace==null) throw new IllegalArgumentException("Source Stack is null");
+        int stackLength=stackTrace.length;
+        if(stackLength==0) return Collections.emptyList();
+
+        List<TraceFrame> stackFrame=new ArrayList<>(stackLength);
+        int stackFrameNumber=stackLength;
+        for (StackTraceElement traceElement:stackTrace){
+            TraceNumber frameNumber=new TraceNumber(--stackFrameNumber);
+            TraceFrame frame=new TraceFrame(frameNumber,traceElement);
+            stackFrame.add(frame);
+        }
+       return stackFrame;
+    }
+@Override
+    public String getMessage(){
+        StringBuilder builder;
+        try{
+            builder=new StringBuilder(BUFFER_SIZE);
+            builder.append("[ ").append(getTechSupportCode()).append("]");
+            builder.append("Thread Id : ").append(threadId).append(".");
+            if(super.getMessage()!=null){
+                builder.append(super.getMessage()).append(".");
+            }
+            if(causeExceptionName!=null){
+                builder.append("Cause: ").append(causeExceptionName).append(". ");
+                builder.append(getCauseExceptionMessage).append(". ");
+            }
+            return builder.toString();
+        }catch (RuntimeException re){
+            return "failed to stringify message . Msg "+re.toString();
+        }
+}
+
+
+    @Override
+    public String toString(){
+        StringBuilder builder;
+        try{
+            builder=new StringBuilder(BUFFER_SIZE);
+           builder.append(this.getClass().getName()).append(": ").append(getMessage()).append("\n");
+            builder.append(frameToString());
+
+            return builder.toString();
+        }catch (RuntimeException re){
+            return "failed to stringify exception . Msg "+re.toString();
+        }
+    }
+
+    private String frameToString() {
+        int traceLength=stackFrame.size();
+        if(traceLength==0) return "";
+
+        int printLimit=(traceLength<MAX_STACK_TRACE_SIZE)?traceLength:MAX_STACK_TRACE_SIZE;
+        List<TraceFrame> printStackFrames=stackFrame.subList(0,printLimit);
+
+        StringBuilder buff=new StringBuilder(BUFFER_SIZE);
+        for (TraceFrame frame:printStackFrames){
+            //reverse stack frame index
+            buff.append("@ ");
+            buff.append(frame.getTraceNumber().getValue());
+            buff.append(":");
+
+            StackTraceElement trace=frame.getStackTraceElement();
+            buff.append(trace.getClassName());
+            buff.append(".");
+            buff.append(trace.getMethodName());
+            buff.append("[");
+            buff.append(trace.getLineNumber());
+            buff.append("]");
+
+            List<Snapshot> snapshots=frame.getSnapshots();
+
+            if(!snapshots.isEmpty()){
+                buff.append(": ");
+                for (Snapshot snapshot:snapshots){
+                    buff.append("[");
+                    buff.append(snapshot.getName());
+                    buff.append("=");
+                    buff.append(snapshot.getValue());
+                    buff.append("]");
+                }
+            }
+            buff.append("\n");
+        }
+        return buff.toString();
+    }
+
+    private int getTechSupportCode() {
+        int hashCode=errorGrid.hashCode();
+        if(hashCode==Integer.MAX_VALUE){
+            hashCode=Integer.MAX_VALUE;
+        }
+        return Math.abs(hashCode);
+    }
+
+    public List<TraceFrame> getStackFrame(){
+        return stackFrame;
+    }
 }
